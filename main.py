@@ -3,21 +3,16 @@ import json
 import math
 import os
 import pickle
-import pprint
 import re
 import shutil
-import threading
 import time
 import tomllib
-import warnings
-import webbrowser
 import zipfile
 from collections import deque
 from zipfile import BadZipFile
 
 import chardet
 import requests
-from bs4 import BeautifulSoup as bs
 from discord_webhook import DiscordWebhook
 from PIL import Image, UnidentifiedImageError
 from plyer import notification as notice
@@ -27,7 +22,6 @@ from requests.exceptions import ChunkedEncodingError, ConnectionError
 from rich.console import Console
 from tomli_w import dump
 from tqdm import tqdm
-# from tqdm.rich import tqdm
 from urllib3.exceptions import ProtocolError
 
 
@@ -157,12 +151,17 @@ class Client:
                             elif attachment["type"] == "psd" and settings["psdConvert"]["enable"]:
                                 psd = PSDImage.open(file)
                                 psd.composite().save(f"{os.path.splitext(file)[0]}.{settings['psdConvert']['format']}")
-                        except (
-                        ProtocolError, UnidentifiedImageError, BadZipFile, ChunkedEncodingError, ConnectionError):
+                            file_num = file_num + 1
+                            file_size = file_size + os.path.getsize(file)
+                            break
+                        except (ProtocolError, UnidentifiedImageError, BadZipFile, ChunkedEncodingError,
+                                ConnectionError):
                             error_count = error_count + 1
                             if error_count > 10:
                                 break
                             time.sleep(10)
+                        except FileNotFoundError:
+                            break
                         except OSError as e:
                             if str(e) == "[Errno 28] No space left on device":
                                 with open("./queue", "wb") as f:
@@ -179,10 +178,6 @@ class Client:
                             os.remove(file)
                             input()
                             exit()
-                        else:
-                            file_num = file_num + 1
-                            file_size = file_size + os.path.getsize(file)
-                            break
                 # time.sleep(1)
                 if "qbar" in locals():
                     qbar.update(1)
@@ -220,6 +215,8 @@ class Client:
                     z.extract(info, extract_dir)
                 except RuntimeError:
                     pass
+        if settings["extract"]["deletezip"]:
+            os.remove(archive)
 
     def parse(self, post: dict):
         title = post["title"].translate(
