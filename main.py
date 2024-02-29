@@ -403,11 +403,11 @@ class Client:
 
         if settings["account"]["cookie"]["session"]:
             cookie = settings["account"]["cookie"]
-            if int(time.time()) > cookie["account"]["expires"]:
+            if int(time.time()) > cookie["expires"]:
                 session_key = get_session()
                 self.api.login(session_key)
             else:
-                self.api.login(cookie["account"]["session"])
+                self.api.login(cookie["session"])
                 print_("[*] Login successfully!")
         else:
             session_key = get_session()
