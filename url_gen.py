@@ -36,12 +36,17 @@ if __name__ == "__main__":
             og_image = soup.select_one("head > meta[property='og:image']")
             content = og_image.get("content")
             try:
-                user_id = re.match(r"https://pixiv.pximg.net/c/\w+/fanbox/public/images/creator/(\d+)", content).group(1)
+                user_id = re.match(
+                    r"https://pixiv.pximg.net/c/\w+/fanbox/public/images/creator/(\d+)",
+                    content,
+                ).group(1)
             except AttributeError:
                 print("err")
                 continue
             if m := re.match(r"https://(\w+)\.fanbox\.cc/posts/(\d+)", url):
-                kemono_url = f"https://kemono.su/fanbox/user/{user_id}/post/{m.group(2)}"
+                kemono_url = (
+                    f"https://kemono.su/fanbox/user/{user_id}/post/{m.group(2)}"
+                )
             else:
                 kemono_url = f"https://kemono.su/fanbox/user/{user_id}"
         elif "www.pixiv.net" == domain or "pixiv.net" == domain:
@@ -62,14 +67,22 @@ if __name__ == "__main__":
                     if res.status_code == 404:
                         continue
                     soup = bs(res.text, "html.parser")
-                    user = json.loads(soup.select_one("head script[type='application/ld+json']").text)
+                    user = json.loads(
+                        soup.select_one("head script[type='application/ld+json']").text
+                    )
                     user_url = user["author"]["url"]
-                    m_ = re.fullmatch(r"https://fantia\.jp/(fanclubs|posts)/(\d+)/?", user_url)
-                    kemono_url = f"https://kemono.su/fantia/user/{m_.group(2)}/post/{m.group(2)}"
+                    m_ = re.fullmatch(
+                        r"https://fantia\.jp/(fanclubs|posts)/(\d+)/?", user_url
+                    )
+                    kemono_url = (
+                        f"https://kemono.su/fantia/user/{m_.group(2)}/post/{m.group(2)}"
+                    )
             else:
                 continue
         elif "www.patreon.com" == domain:
-            if m := re.fullmatch(r"https://www.patreon.com/user(/posts)?\?u=(\d+)", url):
+            if m := re.fullmatch(
+                r"https://www.patreon.com/user(/posts)?\?u=(\d+)", url
+            ):
                 kemono_url = f"https://kemono.su/patreon/user/{m.group(2)}"
             elif m := re.match(r"https://www\.patreon\.com/(\w+)/?", url):
                 res = requests.get(url, headers=headers)
@@ -78,15 +91,19 @@ if __name__ == "__main__":
                 soup = bs(res.text, "html.parser")
                 user = json.loads(soup.select_one("#__NEXT_DATA__").text)
                 if m.group(1) == "posts":
-                    m = re.fullmatch(r"https://www\.patreon\.com/posts/(.+)-(\w+)/?", url)
-                    user_id = \
-                    user["props"]["pageProps"]["bootstrapEnvelope"]["bootstrap"]["post"]["data"]["relationships"]["user"][
-                        "data"]["id"]
-                    kemono_url = f"https://kemono.su/patreon/user/{user_id}/post/{m.group(2)}"
+                    m = re.fullmatch(
+                        r"https://www\.patreon\.com/posts/(.+)-(\w+)/?", url
+                    )
+                    user_id = user["props"]["pageProps"]["bootstrapEnvelope"][
+                        "bootstrap"
+                    ]["post"]["data"]["relationships"]["user"]["data"]["id"]
+                    kemono_url = (
+                        f"https://kemono.su/patreon/user/{user_id}/post/{m.group(2)}"
+                    )
                 else:
-                    user_id = \
-                    user["props"]["pageProps"]["bootstrapEnvelope"]["bootstrap"]["campaign"]["data"]["relationships"][
-                        "creator"]["data"]["id"]
+                    user_id = user["props"]["pageProps"]["bootstrapEnvelope"][
+                        "bootstrap"
+                    ]["campaign"]["data"]["relationships"]["creator"]["data"]["id"]
                     kemono_url = f"https://kemono.su/patreon/user/{user_id}"
             else:
                 continue
@@ -95,16 +112,24 @@ if __name__ == "__main__":
             if res.status_code == 404:
                 continue
             soup = bs(res.text, "html.parser")
-            user = json.loads(soup.select_one("body script[data-component-name='Profile']").text)
+            user = json.loads(
+                soup.select_one("body script[data-component-name='Profile']").text
+            )
             user_id = user["creator_profile"]["external_id"]
             if m := re.match(r"https://(\w+)\.gumroad\.com/l/(\w+)", url):
-                kemono_url = f"https://kemono.su/gumroad/user/{user_id}/post/{m.group(2)}"
+                kemono_url = (
+                    f"https://kemono.su/gumroad/user/{user_id}/post/{m.group(2)}"
+                )
             else:
                 kemono_url = f"https://kemono.su/gumroad/user/{user_id}"
         else:
             continue
-        status_code = requests.head(kemono_url).status_code
-        if status_code == 404 or status_code == 302:
-            continue
-        print(f"{url} -> {kemono_url}")
-        webbrowser.open(kemono_url)
+        try:
+            status_code = requests.head(kemono_url).status_code
+            if status_code == 404 or status_code == 302:
+                continue
+        except requests.exceptions.ConnectionError:
+            print("[WinError 10061] 対象のコンピューターによって拒否されたため、接続できませんでした。")
+        else:
+            print(f"{url} -> {kemono_url}")
+            webbrowser.open(kemono_url)
