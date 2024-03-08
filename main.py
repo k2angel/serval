@@ -28,7 +28,10 @@ from urllib3.exceptions import ProtocolError
 class Api:
     def __init__(self):
         self.base_url = "https://kemono.su"
-        self.headers = {"accept": "application/json"}
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "accept": "application/json"
+        }
         self.cookies = None
 
     def creators(self) -> list:
@@ -92,9 +95,13 @@ class Api:
                           headers=self.headers, cookies=self.cookies)
 
     def download(self, url, file):
-        with requests.get(url, stream=True) as response:
-            with open(file, "wb") as f:
-                shutil.copyfileobj(response.raw, f)
+        try:
+            with requests.get(url, stream=True, headers=self.headers) as response:
+                with open(file, "wb") as f:
+                    shutil.copyfileobj(response.raw, f)
+        except Exception as e:
+            print(type(e))
+            print(str(e))
 
 
 class Client:
@@ -215,7 +222,7 @@ class Client:
                     z.extract(info, extract_dir)
                 except RuntimeError:
                     pass
-        if settings["extract"]["deletezip"]:
+        if settings["extract"]["deleteZip"]:
             os.remove(archive)
 
     def parse(self, post: dict):
@@ -537,7 +544,7 @@ if __name__ == "__main__":
             else:
                 client.search_creator(word)
         elif mode == "u":
-            client.creators(update=True)
+            creators = client.creators(update=True)
         elif mode == "l":
             client.login()
         elif mode == "f":
