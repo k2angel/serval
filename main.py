@@ -188,7 +188,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     subparser = parser.add_subparsers()
 
-    _download = subparser.add_parser("download", help="urlを基にダウンロードします", epilog="対応サイト一覧: [kemono.su, pixiv.net, fantia.jp, patreon.com, gumroad.com]")
+    _download = subparser.add_parser("download", help="urlを基にダウンロードします", epilog="対応サイト一覧: [kemono.su, pixiv.net, fanbox.cc, fantia.jp, patreon.com, gumroad.com]")
     _download.add_argument("url", type=str, help="urlを指定します (discord非対応)")
     _download.add_argument("-p", "--page", type=int, help="指定したページの投稿のみをダウンロードします")
     _download.add_argument("-w", "--word", type=str, help="指定したワードがタイトルに入っている場合ダウンロードします (二文字以上限定)")
