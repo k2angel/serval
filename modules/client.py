@@ -1,15 +1,16 @@
-from argparse import Namespace
+import io
 import json
 import math
 import os
-import time
 from collections import deque
-from xmlrpc.client import ProtocolError
 from zipfile import BadZipFile
 
 from PIL import Image, UnidentifiedImageError
 from tqdm import tqdm
+from urllib3.exceptions import ProtocolError
 
+from . import global_var
+from .global_var import domain, base_url
 from .api import Api
 from .common import Color, Table, logger
 
@@ -22,7 +23,8 @@ class Client:
 
         self.creators(False)
 
-    def download(self, args: Namespace):
+    # キューをダウンロード
+    def download(self):
         def convert_size(size):
             units = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB")
             i = math.floor(math.log(size, 1024)) if size > 0 else 0
@@ -68,81 +70,48 @@ class Client:
             qbar = tqdm(range(dsize), "Queue", leave=False)
         for i in range(dsize):
             data = self.deque.popleft()
+            # フォルダ名に使えない文字を置換、スペースを除去
             path = os.path.join(
                 "./img",
                 data["service"],
-                f"[{data['creator_id']}] {data['creator_name'].translate(folder_name)}",
-                f"[{data['post_id']}] {data['title'].translate(folder_name)}",
+                f"[{data['creator_id']}] {data['creator_name'].translate(folder_name).strip()}",
+                f"[{data['post_id']}] {data['title'].translate(folder_name).strip()}",
             )
+            if global_var.args.flat:
+                path = os.path.dirname(path)
             if not os.path.exists(path):
                 os.makedirs(path, exist_ok=True)
-            for attachment in tqdm(
-                data["attachments"],
-                "Attachments",
-                leave=False,
-            ):
-                url = attachment["url"]
-                name = str(attachment["name"] or os.path.basename(url))
-                file = os.path.join(path, name)
+            for attachment in tqdm(data["attachments"], "Attachments", leave=False):
+                file = os.path.join(path, attachment["name"])
                 if os.path.exists(file):
+                    logger.debug("skip: " + file)
                     continue
-                error_count = 0
                 _type = attachment["type"]
-                while True:
-                    try:
-                        if (
-                            not args.image
-                            and not args.archive
-                            and not args.movie
-                            and not args.psd
-                            and not args.pdf
-                        ):
-                            pass
-                        elif _type == "image" and not args.image:
-                            break
-                        elif _type == "archive" and not args.archive:
-                            break
-                        elif _type == "movie" and not args.movie:
-                            break
-                        elif _type == "psd" and not args.psd:
-                            break
-                        elif _type == "pdf" and not args.pdf:
-                            break
-                        self.api.download(url, file)
-                        if _type == "image":
-                            # ファイル破損チェック
-                            Image.open(file)
-                        file_num = file_num + 1
-                        file_size = file_size + os.path.getsize(file)
-                        break
-                    except (
-                        ProtocolError,
-                        UnidentifiedImageError,
-                        BadZipFile,
-                        ConnectionError,
-                    ):
-                        error_count = error_count + 1
-                        if error_count > 10:
-                            break
-                        time.sleep(10)
-                    except FileNotFoundError:
-                        break
-                    except OSError as e:
-                        os.remove(file)
-                        if str(e) == "[Errno 28] No space left on device":
-                            Color.warn("No space left on device")
-                            input()
-                            exit()
-                        else:
-                            logger.debug(type(e))
-                            logger.debug(str(e))
-                    except Exception as e:
-                        logger.debug(type(e))
-                        logger.debug(str(e))
+                try:
+                    self.api.download(attachment["url"], file)
+                    # ファイル破損チェック
+                    if _type == "image":
+                        Image.open(file)
+                    file_num = file_num + 1
+                    file_size = file_size + os.path.getsize(file)
+                    logger.debug("download: " + file)
+                # ファイルが破損していた場合削除
+                except (ProtocolError, UnidentifiedImageError, BadZipFile, ConnectionError):
+                    os.remove(file)
+                except FileNotFoundError:
+                    logger.debug("notfound: " + file)
+                except OSError as e:
+                    logger.debug(type(e))
+                    logger.debug(str(e))
+                    # 空き容量が無い場合は終了
+                    if str(e) == "[Errno 28] No space left on device":
+                        Color.warn("No space left on device")
+                        input()
+                        exit()
             # time.sleep(1)
-            if "qbar" in locals():
+            if dsize != 1:
                 qbar.update(1)
-        if "qbar" in locals():
+        if dsize != 1:
             qbar.close()
 
         table = Table()
@@ -153,60 +122,70 @@ class Client:
 
         Color.info("Download completed.")
 
-    def parse(self, post: dict, bw=None):
+    # 投稿の解析
+    def parse(self, post: dict, bw=None, cover=False):
         title = post["title"]
-        if bw is not None and bw in title:
+        if bw is not None and bw.lower() in title.lower():
             return
         creator_id = post["user"]
-        creator_name = self.creator_info(creator_id)["name"]
         post_id = post["id"]
-        service = post["service"]
-        if not post["attachments"]:
-            return
         attachments = list()
         page = 0
+        if cover:
+            url = os.path.join(f"https://img.{domain}/thumbnail/data/{post['file']['path']}")
+            try:
+                img = Image.open(io.BytesIO(self.api.get_content(url)))
+            except UnidentifiedImageError as e:
+                logger.debug(str(e))
+                logger.debug(url)
+            else:
+                if (800, 420) != img.size:
+                    ext = os.path.splitext(post["file"]["name"])[1]
+                    url = f"{base_url}/data/{post['file']['path']}"
+                    attachments.append({"name": f"{post_id}_p{page}{ext}", "url": url, "type": "image"})
+                    page = page + 1
         for attachment in post["attachments"]:
             basename = attachment["name"]
-            name, ext = os.path.splitext(basename)
-            if ext in [".jpg", ".jpeg", ".png", ".gif"]:
-                    _type = "image"
-            elif ext == ".psd":
-                _type = "psd"
-            elif ext == ".zip":
-                _type = "archive"
-            elif ext in [".mp4", ".mov", ".mkv"]:
-                _type = "movie"
+            ext = os.path.splitext(basename)[1][1:]
+            if ext in global_var.exts.keys():
+                _type = global_var.exts[ext]
+                if global_var.enable_filter and not global_var.args_dict[_type]:
+                    continue
             else:
                 _type = "unknown"
+                continue
             # if _type == "image" and len(name) == 24:
             if _type == "image":
-                basename = f"{post_id}_p{page}{ext}"
+                basename = f"{post_id}_p{page}.{ext}"
                 page = page + 1
-            url = f"{self.api.base_url}/data/{attachment['path']}"
+            url = f"{base_url}/data/{attachment['path']}"
             attachments.append({"name": basename, "url": url, "type": _type})
+        if len(attachments) == 0:
+            return
         data = {
             "title": title,
             "creator_id": creator_id,
-            "creator_name": creator_name,
+            "creator_name": self.creator_info(creator_id)["name"],
             "post_id": post_id,
-            "service": service,
+            "service": post["service"],
             "attachments": attachments,
         }
         self.deque.append(data)
 
+    # ユーザー一覧を更新、読込
     def creators(self, update: bool):
         if not os.path.exists("creators.json") or update:
-            creators = self.api.creators()
-            creators_ = {}
-            for creator in creators:
+            creators = {}
+            for creator in self.api.creators():
                 id = creator["id"]
-                creators_[id] = creator
-            self._creators = creators_
+                creators[id] = creator
+            self._creators = creators
             with open("creators.json", "w", encoding="utf-8") as f:
                 json.dump(self._creators, f, ensure_ascii=False, indent=4)
         else:
             self._creators = json.load(open("creators.json", "r", encoding="utf-8"))
 
+    # ユーザー情報を取得
     def creator_info(self, creator_id: int | str) -> dict:
         try:
             creator = self._creators[creator_id]
@@ -215,6 +194,7 @@ class Client:
         else:
             return creator
 
+    # ユーザーを検索
     def search_creator(self, word: str, service: str | None):
         creators_data = []
         for creator in self._creators.values():
@@ -231,28 +211,29 @@ class Client:
                     "id": _id,
                     "service": _service,
                     "url": (
-                        f"https://kemono.su/{_service}/user/{_id}"
+                        f"{base_url}/{_service}/user/{_id}"
                         if _service != "discord"
-                        else f"https://kemono.su/{_service}/server/{_id}"
+                        else f"{base_url}/{_service}/server/{_id}"
                     ),
                 }
                 creators_data.append(creator_data)
 
         return creators_data
 
-    def creator(self, service: str, creator_id: int | str, args: Namespace):
+    def creator(self, service: str, creator_id: int | str):
         _creator = self.creator_info(creator_id)
         print(f"{_creator['name']}@{_creator['service']}[{_creator['id']}]")
         if _creator:
-            offset = 0 if args.page is None else (args.page - 1) * 50
-            word = None if args.word is None else args.word+" "
+            offset = 0 if global_var.args.page is None else (global_var.args.page - 1) * 50
+            word = None if global_var.args.word is None else global_var.args.word + " "
+            tag = None if global_var.args.tag is None else global_var.args.tag
             while True:
-                posts = self.api.creator(service, creator_id, offset=offset, word=word)
+                posts = self.api.creator(service, creator_id, offset=offset, word=word, tag=tag)
                 for post in posts:
-                    self.parse(post, bw=args.block_word)
+                    self.parse(post, bw=global_var.args.block_word, cover=global_var.args.cover)
                 if len(posts) < 50:
                     break
-                if args.page is not None:
+                if global_var.args.page is not None:
                     break
                 offset = offset + 50
         else:
@@ -263,8 +244,9 @@ class Client:
         if _post == {"error": "Not Found"}:
             Color.warn("Not found.")
             return
-        self.parse(_post["post"])
+        self.parse(_post["post"], cover=global_var.args.cover)
 
+    # チャンネル一覧を表示
     def discord_server(self, discord_server: int | str):
         channels = self.api.discord_server(discord_server)
         if channels:
@@ -272,7 +254,7 @@ class Client:
             table.add_column("Channel")
             table.add_column("ID")
             for channel in channels:
-                table.add_row("#"+channel["name"], channel["id"])
+                table.add_row("#" + channel["name"], channel["id"])
             table.print()
         else:
             Color.warn("Not found.")
